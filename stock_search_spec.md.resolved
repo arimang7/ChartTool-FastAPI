@@ -1,0 +1,720 @@
+# 📈 종목 검색 (Stock Search) — 개발 스펙
+
+> FastAPI 프로젝트 왼쪽 사이드바의 **종목 검색** 섹션에 대한 상세 기술 명세서
+
+---
+
+## 목차
+
+- [1. 기능 개요](#1-기능-개요)
+- [2. UI 컴포넌트 명세](#2-ui-컴포넌트-명세)
+- [3. 프론트엔드 동작 명세](#3-프론트엔드-동작-명세)
+- [4. 백엔드 API 명세](#4-백엔드-api-명세)
+- [5. 서비스 레이어 명세](#5-서비스-레이어-명세)
+- [6. 데이터 구조](#6-데이터-구조)
+- [7. 시퀀스 다이어그램](#7-시퀀스-다이어그램)
+- [8. 파일 맵](#8-파일-맵)
+- [9. 에러 처리](#9-에러-처리)
+- [10. 반응형 / 접근성](#10-반응형--접근성)
+
+---
+
+## 1. 기능 개요
+
+### 목적
+사용자가 **미국(US) / 한국(KR) / 홍콩(HK)** 시장의 주식 종목을 이름 또는 티커 심볼로 검색하고, 원하는 조회 기간을 선택하여 차트 데이터를 로드하는 기능.
+
+### 핵심 플로우
+
+```
+시장 선택 → 종목명/티커 입력 → 자동완성 드롭다운 → 종목 선택 → 기간 선택 → 검색 클릭
+    → [차트 데이터 로드 + 뉴스 로드] → 메인 화면에 차트/지표/뉴스 렌더링
+```
+
+### 지원 시장
+
+| 시장 | 코드 | 검색 소스 | 심볼 예시 |
+|------|------|-----------|-----------|
+| 🇺🇸 미국 | `US` | yfinance Search API | `AAPL`, `TSLA`, `TEM` |
+| 🇰🇷 한국 | `KR` | 로컬 CSV + yfinance Fallback | `005930.KS`, `035420.KS` |
+| 🇭🇰 홍콩 | `HK` | 하드코딩 리스트 (25종목) | `0700.HK`, `9988.HK` |
+
+---
+
+## 2. UI 컴포넌트 명세
+
+### 2.1. 전체 레이아웃
+
+종목 검색 영역은 사이드바 (`<aside class="sidebar">`) 내에 위치하며 상단 인증 섹션과 하단 뉴스 섹션 사이에 구분선(`divider`)으로 분리됩니다.
+
+```
+┌─────────────────────────────┐
+│  📈 AI 주식 분석 (로고)       │
+│─────────────────────────────│
+│  👤 Google 로그인 / 사용자 정보 │
+│─────────────────────────────│
+│  📈 종목 검색                 │  ← 이 섹션
+│  ┌───────────────────────┐  │
+│  │ 시장 선택              │  │
+│  │ [US 미국         ▼ ]  │  │
+│  ├───────────────────────┤  │
+│  │ 종목명 / 티커          │  │
+│  │ [TEM              ]   │  │
+│  │ ┌─ 자동완성 드롭다운 ─┐ │  │
+│  │ │ Tempus AI   TEM    │ │  │
+│  │ │ TemplGen    TMPL   │ │  │
+│  │ └───────────────────┘ │  │
+│  ├───────────────────────┤  │
+│  │ 조회 기간              │  │
+│  │ [1년             ▼ ]  │  │
+│  ├───────────────────────┤  │
+│  │ [      검색       ]   │  │
+│  └───────────────────────┘  │
+│─────────────────────────────│
+│  📰 최근 주요 뉴스            │
+└─────────────────────────────┘
+```
+
+### 2.2. 컴포넌트 상세
+
+#### ① 시장 선택 (Market Selector)
+
+| 속성 | 값 |
+|------|-----|
+| HTML 요소 | `<select id="marketSelect">` |
+| 이벤트 | `onchange="onMarketChange()"` |
+| 옵션 | `US` (미국, 기본값), `KR` (한국), `HK` (홍콩) |
+| 스타일 | 커스텀 드롭다운 화살표, 다크 배경, 포커스 시 보라색 glow |
+
+```html
+<select id="marketSelect" onchange="onMarketChange()">
+    <option value="US">US 미국</option>
+    <option value="KR">KR 한국</option>
+    <option value="HK">HK 홍콩</option>
+</select>
+```
+
+#### ② 종목명/티커 입력 (Ticker Input)
+
+| 속성 | 값 |
+|------|-----|
+| HTML 요소 | `<input type="text" id="tickerInput">` |
+| 기본값 | `AAPL` |
+| Placeholder | 시장에 따라 동적 변경 |
+| autocomplete | `off` (브라우저 자동완성 비활성화) |
+| 디바운스 | 입력 후 **300ms** 대기 후 검색 API 호출 |
+
+**시장별 Placeholder 변경:**
+
+| 시장 | Placeholder |
+|------|-------------|
+| US | `종목명 또는 티커 (예: AAPL)` |
+| KR | `종목명 또는 코드 (예: 삼성전자)` |
+| HK | `종목명 또는 코드 (예: Tencent)` |
+
+#### ③ 자동완성 드롭다운 (Autocomplete Dropdown)
+
+| 속성 | 값 |
+|------|-----|
+| HTML 요소 | `<div id="autocompleteDropdown" class="autocomplete-dropdown">` |
+| 위치 | 입력 필드 바로 아래 (`position: absolute`) |
+| 최대 높이 | `240px` (스크롤 가능) |
+| z-index | `50` |
+| 각 항목 구조 | 왼쪽: 종목명 (`ac-name`), 오른쪽: 심볼 (`ac-symbol`) |
+
+**항목 표시 예시:**
+
+```
+┌──────────────────────────────┐
+│ Tempus AI                TEM │
+│ Templeton Emerging      EMF  │
+│ TemplGen Inc            TMPL │
+└──────────────────────────────┘
+```
+
+#### ④ 조회 기간 (Period Selector)
+
+| 속성 | 값 |
+|------|-----|
+| HTML 요소 | `<select id="periodSelect">` |
+| 옵션 | 아래 표 참조 |
+
+| 값 | 라벨 | 기본 선택 |
+|----|------|----------|
+| `1mo` | 1개월 | |
+| `3mo` | 3개월 | |
+| `6mo` | 6개월 | |
+| `1y` | 1년 | ✅ (selected) |
+| `2y` | 2년 | |
+
+#### ⑤ 검색 버튼
+
+| 속성 | 값 |
+|------|-----|
+| HTML 요소 | `<button id="searchBtn" class="btn btn-primary">` |
+| 이벤트 | `onclick="loadStockData()"` |
+| 로딩 상태 | 텍스트 숨김 → 스피너 표시, disabled 처리 |
+| 스타일 | 보라색 그라디언트 (`#6c5ce7` → `#a29bfe`), hover 시 glow + 위로 1px 이동 |
+
+---
+
+## 3. 프론트엔드 동작 명세
+
+> 소스: [app.js](file:///d:/workspace_cli/ChartTool/FastAPI/static/app.js)
+
+### 3.1. 상태 변수
+
+```javascript
+let currentTicker = 'AAPL';     // 현재 선택된 티커
+let currentPeriod = '1y';       // 현재 조회 기간
+let currentMarket = 'US';       // 현재 선택된 시장
+let currentNewsText = '';       // AI 분석에 전달할 뉴스 텍스트
+let searchDebounceTimer = null; // 디바운스 타이머
+let acSelectedIndex = -1;       // 자동완성 키보드 선택 인덱스
+```
+
+### 3.2. 이벤트 흐름
+
+#### A. 시장 변경 ([onMarketChange](file:///d:/workspace_cli/ChartTool/FastAPI/static/app.js#114-132))
+
+```mermaid
+flowchart LR
+    A[시장 선택 변경] --> B[currentMarket 업데이트]
+    B --> C[Placeholder 변경]
+    C --> D[입력 필드 초기화]
+    D --> E[자동완성 닫기]
+```
+
+| 동작 | 설명 |
+|------|------|
+| 시장 값 읽기 | `document.getElementById('marketSelect').value` |
+| Placeholder 변경 | 시장에 따라 예시 텍스트 변경 |
+| 입력값 초기화 | `tickerInput.value = ''` |
+| 자동완성 닫기 | [hideAutocomplete()](file:///d:/workspace_cli/ChartTool/FastAPI/static/app.js#170-174) 호출 |
+
+#### B. 입력 → 자동완성 (`input` 이벤트 + [searchTicker](file:///d:/workspace_cli/ChartTool/FastAPI/static/app.js#133-146))
+
+```mermaid
+flowchart TD
+    A[사용자 입력] --> B{글자 수 >= 1?}
+    B -- 아니오 --> C[자동완성 닫기]
+    B -- 예 --> D[이전 타이머 취소]
+    D --> E[300ms 디바운스 시작]
+    E --> F["searchTicker(query) 호출"]
+    F --> G["GET /api/stock/search?q={query}&market={market}"]
+    G --> H{결과 있음?}
+    H -- 예 --> I[renderAutocomplete 호출]
+    H -- 아니오 --> J[자동완성 닫기]
+    I --> K[드롭다운 표시]
+```
+
+**디바운스 로직:**
+```javascript
+tickerInput.addEventListener('input', () => {
+    acSelectedIndex = -1;
+    clearTimeout(searchDebounceTimer);
+    const q = tickerInput.value.trim();
+    if (q.length < 1) { hideAutocomplete(); return; }
+    searchDebounceTimer = setTimeout(() => searchTicker(q), 300);
+});
+```
+
+#### C. 키보드 탐색 (`keydown` 이벤트)
+
+| 키 | 동작 |
+|----|------|
+| `↓ (ArrowDown)` | 드롭다운 내 다음 항목으로 이동 (하이라이트) |
+| `↑ (ArrowUp)` | 드롭다운 내 이전 항목으로 이동 |
+| `Enter` | 하이라이트된 항목 선택 → 검색 실행 / 항목 없으면 직접 검색 |
+| `Escape` | 자동완성 닫기 |
+
+**하이라이트 로직:**
+- `acSelectedIndex` 로 현재 선택 인덱스 관리
+- [updateAcHighlight(items)](file:///d:/workspace_cli/ChartTool/FastAPI/static/app.js#74-83) 로 `.active` 클래스 토글
+- 선택된 항목이 보이도록 `scrollIntoView({ block: 'nearest' })` 호출
+
+#### D. 종목 선택 ([selectTicker](file:///d:/workspace_cli/ChartTool/FastAPI/static/app.js#163-169))
+
+```mermaid
+flowchart LR
+    A[자동완성 항목 클릭] --> B[입력 필드에 심볼 설정]
+    B --> C[currentTicker 업데이트]
+    C --> D[자동완성 닫기]
+    D --> E["loadStockData() 자동 호출"]
+```
+
+#### E. 검색 실행 ([loadStockData](file:///d:/workspace_cli/ChartTool/FastAPI/static/app.js#175-240))
+
+```mermaid
+flowchart TD
+    A["검색 버튼 클릭 또는 Enter"] --> B{티커 입력 여부?}
+    B -- 없음 --> C["토스트: '티커를 입력해주세요.'"]
+    B -- 있음 --> D[US 시장이면 대문자 변환]
+    D --> E[버튼 로딩 상태 설정]
+    E --> F["Promise.all 병렬 요청"]
+    F --> G["GET /api/stock/data?symbol={ticker}&period={period}"]
+    F --> H["GET /api/stock/news?symbol={ticker}"]
+    G --> I{성공?}
+    I -- 실패 --> J["토스트: 에러 메시지"]
+    I -- 성공 --> K[타이틀 업데이트]
+    K --> L["renderChart(data)"]
+    L --> M[현재가 / RSI / 패턴 지표 업데이트]
+    M --> N["renderNews(news)"]
+    N --> O[AI 분석 버튼 활성화]
+    O --> P["토스트: '데이터 로드 완료'"]
+    H --> N
+```
+
+**병렬 데이터 로드:**
+```javascript
+const [dataRes, newsRes] = await Promise.all([
+    fetch(`/api/stock/data?symbol=${encodeURIComponent(ticker)}&period=${currentPeriod}`),
+    fetch(`/api/stock/news?symbol=${encodeURIComponent(ticker)}`)
+]);
+```
+
+### 3.3. 외부 클릭 핸들링
+
+- 자동완성 `wrapper` 외부 클릭 시 드롭다운 닫기
+- 모바일에서 사이드바 외부 클릭 시 사이드바 닫기
+
+---
+
+## 4. 백엔드 API 명세
+
+> 소스: [routers/stock.py](file:///d:/workspace_cli/ChartTool/FastAPI/routers/stock.py)
+
+### 4.1. 종목 검색 API
+
+```
+GET /api/stock/search
+```
+
+| 파라미터 | 타입 | 필수 | 기본값 | 설명 |
+|---------|------|------|--------|------|
+| `q` | `string` | ✅ | - | 검색어 (종목명 또는 티커) |
+| `market` | `string` | ❌ | `"US"` | 시장 코드 (`US`, `KR`, `HK`) |
+
+**응답 (200 OK):**
+```json
+{
+  "results": [
+    {
+      "symbol": "TEM",
+      "name": "Tempus AI Inc",
+      "market": "US"
+    },
+    {
+      "symbol": "TMPL",
+      "name": "TemplGen Inc",
+      "market": "US"
+    }
+  ]
+}
+```
+
+**KR 시장 응답 (추가 필드):**
+```json
+{
+  "results": [
+    {
+      "symbol": "005930.KS",
+      "name": "삼성전자",
+      "name_en": "Samsung Electronics",
+      "market": "KR"
+    }
+  ]
+}
+```
+
+### 4.2. 주식 데이터 API
+
+```
+GET /api/stock/data
+```
+
+| 파라미터 | 타입 | 필수 | 기본값 | 설명 |
+|---------|------|------|--------|------|
+| `symbol` | `string` | ✅ | - | 종목 티커 (예: `AAPL`, `005930.KS`) |
+| `period` | `string` | ❌ | `"1y"` | 조회 기간 (`1mo`, `3mo`, `6mo`, `1y`, `2y`) |
+
+**응답 (200 OK):**
+```json
+{
+  "dates": ["2025-03-01", "2025-03-02", ...],
+  "open": [150.0, 151.2, ...],
+  "high": [152.5, 153.0, ...],
+  "low": [149.0, 150.5, ...],
+  "close": [151.5, 152.8, ...],
+  "volume": [85000000, 72000000, ...],
+  "upper": [155.2, 155.8, ...],
+  "lower": [145.3, 146.0, ...],
+  "ma20": [150.1, 150.5, ...],
+  "rsi": [55.2, 57.8, ...],
+  "vol_spike_dates": ["2025-04-15", "2025-05-02"],
+  "current_price": 152.80,
+  "current_rsi": 57.80,
+  "harmonic_pattern": { ... },
+  "company_name": "Apple Inc."
+}
+```
+
+**에러 응답 (404):**
+```json
+{
+  "detail": "데이터를 불러올 수 없습니다. 티커를 확인해주세요."
+}
+```
+
+### 4.3. 뉴스 API
+
+```
+GET /api/stock/news
+```
+
+| 파라미터 | 타입 | 필수 | 설명 |
+|---------|------|------|------|
+| `symbol` | `string` | ✅ | 종목 티커 |
+
+**응답 (200 OK):**
+```json
+{
+  "news": [
+    { "title": "Article headline...", "link": "https://..." },
+    { "title": "Another headline...", "link": "https://..." }
+  ]
+}
+```
+
+---
+
+## 5. 서비스 레이어 명세
+
+### 5.1. 검색 서비스 ([search_service.py](file:///d:/workspace_cli/ChartTool/FastAPI/services/search_service.py))
+
+> 소스: [services/search_service.py](file:///d:/workspace_cli/ChartTool/FastAPI/services/search_service.py)
+
+#### 통합 진입점: [search_stocks(query, market, limit)](file:///d:/workspace_cli/ChartTool/FastAPI/services/search_service.py#164-175)
+
+```python
+def search_stocks(query: str, market: str = "US", limit: int = 10) -> list[dict]
+```
+
+시장 값에 따라 내부적으로 아래 함수를 분기 호출합니다.
+
+#### 🇺🇸 US 검색: [search_us(query, limit=10)](file:///d:/workspace_cli/ChartTool/FastAPI/services/search_service.py#136-159)
+
+| 항목 | 내용 |
+|------|------|
+| 데이터 소스 | `yfinance.Search(query)` |
+| 필터링 | 미국 거래소만 (`NMS`, `NYQ`, `NGM`, `PCX`, `BTS`, `NAS`, `NYS`) |
+| 반환 필드 | `symbol`, `name`, `market` |
+| 에러 처리 | Exception 발생 시 빈 리스트 반환 |
+
+```mermaid
+flowchart TD
+    A["search_us(query)"] --> B["yf.Search(query)"]
+    B --> C[quotes 리스트 추출]
+    C --> D{각 quote 순회}
+    D --> E{미국 거래소?}
+    E -- 예 --> F[결과 리스트에 추가]
+    E -- 아니오 --> D
+    F --> G{limit 도달?}
+    G -- 예 --> H[결과 반환]
+    G -- 아니오 --> D
+```
+
+#### 🇰🇷 KR 검색: [search_kr(query, limit=15)](file:///d:/workspace_cli/ChartTool/FastAPI/services/search_service.py#34-79)
+
+| 항목 | 내용 |
+|------|------|
+| 1차 소스 | 로컬 CSV ([data/krx_stocks.csv](file:///d:/workspace_cli/ChartTool/FastAPI/data/krx_stocks.csv), 92종목) — `@lru_cache(maxsize=1)` |
+| 매칭 방식 | 한글명, 영문명, 코드 모두 부분 매칭 (대소문자 무시) |
+| 심볼 변환 | KOSPI → `.KS`, KOSDAQ → `.KQ` 접미사 자동 부착 |
+| 2차 소스 | 로컬 결과 3개 미만 + 검색어 2자 이상 시 `yfinance.Search` fallback |
+| Fallback 필터 | `.KS` 또는 `.KQ` 접미사 종목만 채택 |
+| 반환 필드 | `symbol`, `name`, `name_en`, `market` |
+
+```mermaid
+flowchart TD
+    A["search_kr(query)"] --> B["_load_krx_stocks() (캐시)"]
+    B --> C[CSV 92종목 로드]
+    C --> D[한글/영문/코드 부분 매칭]
+    D --> E{결과 >= 3개?}
+    E -- 예 --> F[결과 반환]
+    E -- 아니오 --> G{검색어 >= 2자?}
+    G -- 예 --> H["yf.Search(query) fallback"]
+    H --> I[".KS/.KQ 종목만 필터"]
+    I --> F
+    G -- 아니오 --> F
+```
+
+**CSV 데이터 형식:**
+
+```
+code,name,name_en,market
+005930,삼성전자,Samsung Electronics,KOSPI
+035420,NAVER,NAVER Corp,KOSPI
+036930,주성엔지니어링,Jusung Engineering,KOSDAQ
+```
+
+#### 🇭🇰 HK 검색: [search_hk(query, limit=15)](file:///d:/workspace_cli/ChartTool/FastAPI/services/search_service.py#116-131)
+
+| 항목 | 내용 |
+|------|------|
+| 데이터 소스 | 하드코딩 리스트 (25종목) — `@lru_cache(maxsize=1)` |
+| 매칭 방식 | 종목명, 코드 부분 매칭 |
+| 심볼 변환 | `{code}.HK` 형식 |
+| 반환 필드 | `symbol`, `name`, `market` |
+
+**주요 홍콩 종목:**
+> Tencent (`0700`), Alibaba (`9988`), HSBC (`0005`), Xiaomi (`1810`), JD.com (`9618`), Meituan (`3690`) 등 25종목
+
+### 5.2. 주식 데이터 서비스 ([stock_service.py](file:///d:/workspace_cli/ChartTool/FastAPI/services/stock_service.py))
+
+> 소스: [services/stock_service.py](file:///d:/workspace_cli/ChartTool/FastAPI/services/stock_service.py)
+
+#### [load_data(symbol, period)](file:///d:/workspace_cli/ChartTool/FastAPI/services/stock_service.py#7-43) → `DataFrame | None`
+
+| 단계 | 처리 내용 |
+|------|----------|
+| 1 | `yf.download(symbol, period, interval="1d")` — OHLCV 다운로드 |
+| 2 | MultiIndex 컬럼 처리 (yfinance 최신 버전 호환) |
+| 3 | 데이터 타입 강제 변환 (`pd.to_numeric`) |
+| 4 | **Bollinger Bands** 계산 — MA20, STD20, Upper (MA+2σ), Lower (MA-2σ) |
+| 5 | **RSI(14)** 계산 — delta → gain/loss → RS → RSI |
+| 6 | **Volume Spike** 판단 — 최근 거래량이 20일 평균의 2배 이상 |
+
+#### [load_news(symbol)](file:///d:/workspace_cli/ChartTool/FastAPI/services/stock_service.py#45-69) → `list[dict]`
+
+| 항목 | 내용 |
+|------|------|
+| 소스 | `yf.Ticker(symbol).news` |
+| 최대 개수 | 5개 |
+| 추출 필드 | `title`, `link` |
+
+#### [df_to_chart_json(df, symbol)](file:///d:/workspace_cli/ChartTool/FastAPI/services/stock_service.py#217-257) → `dict`
+
+DataFrame을 Plotly.js 호환 JSON으로 변환 + 하모닉 패턴 탐지 + 종목명 조회를 종합 처리.
+
+---
+
+## 6. 데이터 구조
+
+### 6.1. 검색 결과 (Search Result)
+
+```typescript
+interface SearchResult {
+  symbol: string;    // "AAPL", "005930.KS", "0700.HK"
+  name: string;      // "Apple Inc", "삼성전자", "Tencent Holdings"
+  name_en?: string;  // KR 시장 전용: "Samsung Electronics"
+  market: string;    // "US" | "KR" | "HK"
+}
+```
+
+### 6.2. 차트 데이터 (Chart Data)
+
+```typescript
+interface ChartData {
+  dates: string[];             // ["2025-03-01", ...]
+  open: (number | null)[];     // OHLCV
+  high: (number | null)[];
+  low: (number | null)[];
+  close: (number | null)[];
+  volume: (number | null)[];
+  upper: (number | null)[];     // Bollinger Upper
+  lower: (number | null)[];     // Bollinger Lower
+  ma20: (number | null)[];      // SMA 20
+  rsi: (number | null)[];       // RSI 14
+  vol_spike_dates: string[];    // 거래량 급증 날짜들
+  current_price: number;        // 최근 종가
+  current_rsi: number;          // 최근 RSI
+  harmonic_pattern: HarmonicPattern | null;
+  company_name: string;         // 종목명
+}
+```
+
+### 6.3. 뉴스 데이터 (News Data)
+
+```typescript
+interface NewsItem {
+  title: string;  // 뉴스 제목
+  link: string;   // 원문 URL
+}
+```
+
+---
+
+## 7. 시퀀스 다이어그램
+
+### 7.1. 자동완성 검색 흐름
+
+```mermaid
+sequenceDiagram
+    actor User
+    participant Input as tickerInput
+    participant JS as app.js
+    participant API as /api/stock/search
+    participant SVC as search_service
+    participant YF as yfinance / CSV
+
+    User->>Input: 문자 입력 ("TEM")
+    Input->>JS: input 이벤트
+    JS->>JS: clearTimeout (이전 타이머)
+    JS->>JS: setTimeout 300ms
+    Note over JS: 300ms 대기
+    JS->>API: GET /api/stock/search?q=TEM&market=US
+    API->>SVC: search_stocks("TEM", "US")
+    SVC->>YF: yf.Search("TEM")
+    YF-->>SVC: quotes 결과
+    SVC->>SVC: 미국 거래소 필터링
+    SVC-->>API: [{symbol, name, market}, ...]
+    API-->>JS: {results: [...]}
+    JS->>JS: renderAutocomplete(results)
+    JS-->>User: 드롭다운 표시
+```
+
+### 7.2. 종목 선택 → 데이터 로드 흐름
+
+```mermaid
+sequenceDiagram
+    actor User
+    participant JS as app.js
+    participant DataAPI as /api/stock/data
+    participant NewsAPI as /api/stock/news
+    participant StockSVC as stock_service
+    participant YF as yfinance
+
+    User->>JS: 자동완성 항목 클릭 (TEM)
+    JS->>JS: selectTicker("TEM", "Tempus AI")
+    JS->>JS: loadStockData()
+    JS->>JS: 버튼 로딩 상태 ON
+
+    par 병렬 요청
+        JS->>DataAPI: GET /api/stock/data?symbol=TEM&period=1y
+        DataAPI->>StockSVC: load_data("TEM", "1y")
+        StockSVC->>YF: yf.download("TEM", "1y", "1d")
+        YF-->>StockSVC: OHLCV DataFrame
+        StockSVC->>StockSVC: Bollinger / RSI / Volume Spike 계산
+        StockSVC->>StockSVC: detect_abcd_pattern()
+        StockSVC->>YF: yf.Ticker("TEM").info
+        YF-->>StockSVC: company_name
+        StockSVC-->>DataAPI: chart_json
+        DataAPI-->>JS: {dates, ohlc, indicators, ...}
+    and
+        JS->>NewsAPI: GET /api/stock/news?symbol=TEM
+        NewsAPI->>YF: yf.Ticker("TEM").news
+        YF-->>NewsAPI: news list
+        NewsAPI-->>JS: {news: [...]}
+    end
+
+    JS->>JS: renderChart(data)
+    JS->>JS: 현재가 / RSI / 패턴 업데이트
+    JS->>JS: renderNews(news)
+    JS->>JS: AI 분석 버튼 활성화
+    JS->>JS: 버튼 로딩 상태 OFF
+    JS-->>User: 차트 + 지표 + 뉴스 렌더링
+```
+
+---
+
+## 8. 파일 맵
+
+모든 종목 검색 관련 코드가 위치한 파일과 해당 라인 범위:
+
+| 레이어 | 파일 | 관련 코드 범위 | 역할 |
+|--------|------|---------------|------|
+| **HTML** | [index.html](file:///d:/workspace_cli/ChartTool/FastAPI/static/index.html#L41-L73) | L41–L73 | 종목 검색 UI 마크업 |
+| **JS** | [app.js](file:///d:/workspace_cli/ChartTool/FastAPI/static/app.js#L1-L14) | L1–L14 | 상태 변수 선언 |
+| **JS** | [app.js](file:///d:/workspace_cli/ChartTool/FastAPI/static/app.js#L17-L72) | L17–L72 | 초기화 / 이벤트 바인딩 |
+| **JS** | [app.js](file:///d:/workspace_cli/ChartTool/FastAPI/static/app.js#L114-L173) | L114–L173 | 시장 변경 / 자동완성 검색 / 선택 |
+| **JS** | [app.js](file:///d:/workspace_cli/ChartTool/FastAPI/static/app.js#L178-L239) | L178–L239 | [loadStockData()](file:///d:/workspace_cli/ChartTool/FastAPI/static/app.js#175-240) — 데이터 로드 핵심 |
+| **CSS** | [style.css](file:///d:/workspace_cli/ChartTool/FastAPI/static/style.css#L158-L214) | L158–L214 | 검색 섹션 / 폼 / select 스타일 |
+| **CSS** | [style.css](file:///d:/workspace_cli/ChartTool/FastAPI/static/style.css#L406-L465) | L406–L465 | 자동완성 드롭다운 스타일 |
+| **CSS** | [style.css](file:///d:/workspace_cli/ChartTool/FastAPI/static/style.css#L467-L501) | L467–L501 | 버튼 / 로더 스타일 |
+| **Router** | [routers/stock.py](file:///d:/workspace_cli/ChartTool/FastAPI/routers/stock.py) | L1–L37 | API 라우터 전체 |
+| **Service** | [services/search_service.py](file:///d:/workspace_cli/ChartTool/FastAPI/services/search_service.py) | L1–L175 | 검색 서비스 전체 |
+| **Service** | [services/stock_service.py](file:///d:/workspace_cli/ChartTool/FastAPI/services/stock_service.py#L1-L68) | L1–L68 | [load_data()](file:///d:/workspace_cli/ChartTool/FastAPI/services/stock_service.py#7-43) / [load_news()](file:///d:/workspace_cli/ChartTool/FastAPI/services/stock_service.py#45-69) |
+| **Service** | [services/stock_service.py](file:///d:/workspace_cli/ChartTool/FastAPI/services/stock_service.py#L217-L258) | L217–L258 | [df_to_chart_json()](file:///d:/workspace_cli/ChartTool/FastAPI/services/stock_service.py#217-257) |
+| **Data** | [data/krx_stocks.csv](file:///d:/workspace_cli/ChartTool/FastAPI/data/krx_stocks.csv) | L1–L92 | KRX 종목 CSV (92종목) |
+
+---
+
+## 9. 에러 처리
+
+### 프론트엔드 에러 처리
+
+| 상황 | 처리 |
+|------|------|
+| 티커 미입력 시 검색 | [showToast('티커를 입력해주세요.', 'error')](file:///d:/workspace_cli/ChartTool/FastAPI/static/app.js#615-624) |
+| 데이터 로드 404 | [showToast(err.detail, 'error')](file:///d:/workspace_cli/ChartTool/FastAPI/static/app.js#615-624) — 서버 에러 메시지 표시 |
+| 네트워크 에러 | [showToast(e.message, 'error')](file:///d:/workspace_cli/ChartTool/FastAPI/static/app.js#615-624) |
+| 자동완성 API 실패 | [hideAutocomplete()](file:///d:/workspace_cli/ChartTool/FastAPI/static/app.js#170-174) — 조용히 닫기 |
+| 검색 완료 후 | 항상 [setButtonLoading(btn, false)](file:///d:/workspace_cli/ChartTool/FastAPI/static/app.js#597-614) — finally 블록 |
+
+### 백엔드 에러 처리
+
+| 상황 | 처리 |
+|------|------|
+| [load_data()](file:///d:/workspace_cli/ChartTool/FastAPI/services/stock_service.py#7-43) 실패 | `HTTPException(404, "데이터를 불러올 수 없습니다. 티커를 확인해주세요.")` |
+| [search_us()](file:///d:/workspace_cli/ChartTool/FastAPI/services/search_service.py#136-159) 예외 | 빈 리스트 `[]` 반환 (서비스 레이어에서 catch) |
+| [search_kr()](file:///d:/workspace_cli/ChartTool/FastAPI/services/search_service.py#34-79) fallback 예외 | 로컬 결과만 반환, fallback 무시 |
+| [load_news()](file:///d:/workspace_cli/ChartTool/FastAPI/services/stock_service.py#45-69) 예외 | 빈 리스트 `[]` 반환 |
+| yfinance `Ticker.info` 실패 | `company_name`을 심볼로 대체 |
+
+---
+
+## 10. 반응형 / 접근성
+
+### 반응형 브레이크포인트
+
+| 화면 크기 | 동작 |
+|---------|------|
+| **> 1024px** | 사이드바 좌측 고정 (320px), 메인 콘텐츠 옆으로 배치 |
+| **768px – 1024px** | 사이드바 유지, 차트 영역/지표 패널이 세로 배치로 전환 |
+| **< 768px** | 사이드바 숨김 (`translateX(-100%)`), ☰ 토글 버튼 표시, 메인 콘텐츠 전체 폭 |
+
+### 모바일 사이드바
+
+- **열기:** ☰ 버튼 클릭 → `.sidebar.open` 클래스 추가 → `translateX(0)` + 그림자
+- **닫기:** 사이드바 외부 클릭 감지 → `.open` 클래스 제거
+
+### 접근성
+
+| 항목 | 구현 |
+|------|------|
+| 키보드 탐색 | ↑/↓/Enter/Escape 키로 자동완성 드롭다운 탐색 |
+| 포커스 표시 | 입력 필드 포커스 시 보라색 박스 그림자 (3px glow) |
+| 시맨틱 HTML | `<label>`, `<select>`, `<input>`, `<button>` 사용 |
+| 로딩 상태 | 버튼 disabled + 스피너 표시 (시각적 피드백) |
+| 문자열 | 한글 UI 라벨 (국제화 미적용, 단일 언어) |
+
+---
+
+## 참고 — CSS 디자인 토큰 (종목 검색 관련)
+
+```css
+/* 배경 */
+--bg-primary: #0f0f1a;              /* 최외곽 배경 */
+--bg-secondary: #1a1a2e;            /* 사이드바 배경 */
+--bg-glass: rgba(255, 255, 255, 0.03); /* 입력 필드 배경 */
+
+/* 텍스트 */
+--text-primary: #e8e8f0;            /* 제목, 입력 텍스트 */
+--text-secondary: #a0a0b8;          /* 라벨, 설명 */
+--text-muted: #6c6c84;              /* Placeholder */
+
+/* 테두리 */
+--border-color: rgba(255, 255, 255, 0.06);  /* 기본 보더 */
+--border-hover: rgba(255, 255, 255, 0.12);  /* 호버 보더 */
+
+/* 액센트 */
+--accent-primary: #6c5ce7;          /* 포커스 보더, 버튼 배경 */
+--accent-secondary: #a29bfe;        /* 심볼 텍스트, 그라디언트 끝 */
+--accent-gradient: linear-gradient(135deg, #6c5ce7 0%, #a29bfe 100%);
+
+/* 인터랙션 */
+--transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+--radius-sm: 8px;
+--sidebar-width: 320px;
+```

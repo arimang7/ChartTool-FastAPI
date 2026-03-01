@@ -1,0 +1,221 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>AI 주식 분석 도구</title>
+    <meta
+      name="description"
+      content="AI 기반 주식 차트 분석 및 하모닉 패턴 분석 도구"
+    />
+    <link rel="stylesheet" href="/static/style.css" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <script src="https://cdn.plot.ly/plotly-2.27.0.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+  </head>
+  <body>
+    <!-- 사이드바 -->
+    <aside class="sidebar" id="sidebar">
+      <div class="sidebar-header">
+        <h1 class="logo">📈 AI 주식 분석</h1>
+      </div>
+
+      <!-- 사용자 계정 -->
+      <div class="auth-section" id="authSection">
+        <div id="loggedOut" class="auth-logged-out">
+          <button
+            class="btn btn-google"
+            id="loginBtn"
+            onclick="location.href = '/api/auth/login'"
+          >
+            <img
+              src="https://fonts.gstatic.com/s/i/productlogos/googleg/v6/24px.svg"
+              alt="G"
+              class="google-icon"
+            />
+            <span>Google 로그인</span>
+          </button>
+        </div>
+        <div id="loggedIn" class="auth-logged-in" style="display: none">
+          <div class="user-info">
+            <span class="user-avatar">👤</span>
+            <span class="user-email" id="userEmail"></span>
+          </div>
+          <button
+            class="btn btn-sm btn-outline"
+            id="logoutBtn"
+            onclick="logout()"
+          >
+            로그아웃
+          </button>
+        </div>
+      </div>
+
+      <div class="divider"></div>
+
+      <!-- 종목 검색 -->
+      <div class="search-section">
+        <h2 class="section-title">📈 종목 검색</h2>
+        <div class="form-group">
+          <label for="marketSelect">시장 선택</label>
+          <select id="marketSelect" onchange="onMarketChange()">
+            <option value="US">US 미국</option>
+            <option value="KR">KR 한국</option>
+            <option value="HK">HK 홍콩</option>
+            <option value="SH">SH 상해</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label for="tickerInput">종목명 / 티커</label>
+          <div class="autocomplete-wrapper">
+            <input
+              type="text"
+              id="tickerInput"
+              value="AAPL"
+              placeholder="종목명 또는 티커 입력"
+              autocomplete="off"
+            />
+            <div id="autocompleteDropdown" class="autocomplete-dropdown"></div>
+          </div>
+        </div>
+        <div class="form-group">
+          <label for="periodSelect">조회 기간</label>
+          <select id="periodSelect">
+            <option value="1mo">1개월</option>
+            <option value="3mo">3개월</option>
+            <option value="6mo">6개월</option>
+            <option value="1y" selected>1년</option>
+            <option value="2y">2년</option>
+          </select>
+        </div>
+        <button
+          class="btn btn-primary"
+          id="searchBtn"
+          onclick="loadStockData()"
+        >
+          <span class="btn-text">검색</span>
+          <span class="btn-loader" style="display: none"></span>
+        </button>
+      </div>
+
+      <div class="divider"></div>
+
+      <!-- 뉴스 -->
+      <div class="news-section">
+        <h2 class="section-title">📰 최근 주요 뉴스</h2>
+        <div id="newsList" class="news-list">
+          <p class="placeholder-text">종목을 검색하면 뉴스가 표시됩니다.</p>
+        </div>
+      </div>
+    </aside>
+
+    <!-- 모바일 사이드바 토글 -->
+    <button class="sidebar-toggle" id="sidebarToggle" onclick="toggleSidebar()">
+      ☰
+    </button>
+
+    <!-- 메인 컨텐츠 -->
+    <main class="main-content" id="mainContent">
+      <!-- 헤더 -->
+      <header class="main-header">
+        <h1 id="mainTitle" class="main-title">
+          📈 AAPL 실시간 차트 및 AI 분석
+        </h1>
+      </header>
+
+      <!-- 차트 + 지표 영역 -->
+      <div class="chart-area">
+        <div class="chart-container">
+          <div id="chartPlaceholder" class="chart-placeholder">
+            <div class="placeholder-content">
+              <span class="placeholder-icon">📊</span>
+              <p>종목을 검색하면 차트가 표시됩니다</p>
+            </div>
+          </div>
+          <div
+            id="chart"
+            style="width: 100%; min-height: 480px; display: none"
+          ></div>
+        </div>
+        <div class="indicators-panel">
+          <h2 class="section-title">주요 지표</h2>
+          <div class="metric-card">
+            <span class="metric-label">현재가</span>
+            <span class="metric-value" id="currentPrice">-</span>
+          </div>
+          <div class="metric-card">
+            <span class="metric-label">RSI(14)</span>
+            <span class="metric-value" id="currentRSI">-</span>
+          </div>
+          <div class="metric-card" id="patternCard">
+            <span class="metric-label">하모닉 패턴</span>
+            <span class="metric-value metric-sm" id="patternType">-</span>
+            <span class="metric-detail" id="patternDetail"></span>
+          </div>
+        </div>
+      </div>
+
+      <!-- AI 분석 섹션 -->
+      <div class="analysis-section">
+        <div class="divider"></div>
+        <h2 class="section-title analysis-title">🪄 AI 심층 분석 리포트</h2>
+        <div class="analysis-buttons">
+          <button
+            class="btn btn-analysis"
+            id="aiAnalysisBtn"
+            onclick="runAnalysis('ai')"
+            disabled
+          >
+            <span class="btn-icon">🤖</span>
+            <span class="btn-text">AI 분석 실행</span>
+            <span class="btn-loader" style="display: none"></span>
+          </button>
+          <button
+            class="btn btn-analysis"
+            id="dcfAnalysisBtn"
+            onclick="runAnalysis('dcf')"
+            disabled
+          >
+            <span class="btn-icon">💰</span>
+            <span class="btn-text">DCF 분석 실행</span>
+            <span class="btn-loader" style="display: none"></span>
+          </button>
+        </div>
+
+        <!-- 분석 진행 단계 표시 -->
+        <div
+          id="analysisProgress"
+          class="analysis-progress"
+          style="display: none"
+        >
+          <div class="progress-steps" id="progressSteps"></div>
+        </div>
+
+        <!-- 분석 결과 표시 -->
+        <div id="analysisResult" class="analysis-result" style="display: none">
+          <div class="result-header">
+            <div class="result-badge" id="resultBadge"></div>
+          </div>
+          <div class="result-content" id="resultContent"></div>
+          <button
+            class="btn btn-telegram"
+            id="telegramBtn"
+            onclick="sendTelegram()"
+          >
+            <span>📨 텔레그램으로 전송하기</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- 알림 토스트 -->
+      <div id="toast" class="toast"></div>
+    </main>
+
+    <script src="/static/app.js"></script>
+  </body>
+</html>

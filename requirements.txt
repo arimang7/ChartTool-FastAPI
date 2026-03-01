@@ -1,0 +1,12 @@
+fastapi
+uvicorn[standard]
+yfinance
+pandas
+plotly
+google-genai
+python-dotenv
+requests
+authlib
+httpx
+PyJWT
+itsdangerous
