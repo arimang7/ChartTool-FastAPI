@@ -1,12 +1,25 @@
 import os
-import re
-import json
 import time
-from google import genai
 from pathlib import Path
 
+from google import genai
+from dotenv import load_dotenv
+
+# Ensure .env is loaded
+load_dotenv()
+
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
-client = genai.Client(api_key=GEMINI_API_KEY)
+client = None
+
+def get_client():
+    global client
+    if client is None:
+        load_dotenv()
+        api_key = os.getenv("GEMINI_API_KEY")
+        if not api_key:
+            raise ValueError("Missing key inputs argument! To use the Google AI API, provide (api_key) arguments.")
+        client = genai.Client(api_key=api_key)
+    return client
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
@@ -54,8 +67,10 @@ DCF_GUIDE_COMPACT = """
 
 
 def _extract_price_levels(text: str) -> dict | None:
-    import re as _re, json as _json
-    pattern_block = '`' + '`' + '`' + 'json' + '\\s*' + '(\\{[^}]+\\})' + '\\s*' + '`' + '`' + '`'
+    import json as _json
+    import re as _re
+
+    pattern_block = "`" + "`" + "`" + "json" + "\\s*" + "(\\{[^}]+\\})" + "\\s*" + "`" + "`" + "`"
     matches = _re.findall(pattern_block, text)
     if not matches:
         pattern_bare = '(\\{"(?:entry|dcf_fair_value)[^}]+\\})'
@@ -69,14 +84,14 @@ def _extract_price_levels(text: str) -> dict | None:
     return None
 
 
-def run_ai_analysis(latest_data: dict, ticker_name: str, news_text: str) -> dict:
+def run_ai_analysis(latest_data: dict, ticker_name: str, news_text: str, model: str = "gemini-2.5-flash") -> dict:
     """AI 기술적/하모닉/뉴스 종합 분석 (축약 프롬프트)"""
     current_price = latest_data["current_price"]
     rsi = latest_data["current_rsi"]
     upper = latest_data.get("upper", 0)
     lower = latest_data.get("lower", 0)
     date = latest_data.get("date", "")
-    current_time = time.strftime('%H:%M:%S')
+    current_time = time.strftime("%H:%M:%S")
 
     prompt = f"""당신은 세계적 퀀트 트레이더이자 하모닉 트레이딩 전문가입니다.
 아래 데이터·뉴스·하모닉 가이드를 종합하여 기술적 분석 리포트를 작성하세요.
@@ -106,26 +121,23 @@ DCF 등 가치평가는 배제, 기술적 점검+모멘텀(뉴스) 위주. 한�
 ```"""
 
     try:
-        response = client.models.generate_content(
-            model='gemini-2.5-flash',
-            contents=prompt
-        )
+        response = get_client().models.generate_content(model=model, contents=prompt)
         price_levels = _extract_price_levels(response.text)
         return {
             "content": response.text,
             "confidence_score": 92,
             "analysis_type": "AI",
-            "price_levels": price_levels
+            "price_levels": price_levels,
         }
     except Exception as e:
         return {
             "content": f"AI 분석 중 오류 발생: {str(e)}",
             "confidence_score": 0,
-            "analysis_type": "AI"
+            "analysis_type": "AI",
         }
 
 
-def run_dcf_analysis(latest_data: dict, ticker_name: str, company_name: str = "") -> dict:
+def run_dcf_analysis(latest_data: dict, ticker_name: str, company_name: str = "", model: str = "gemini-2.5-flash") -> dict:
     """DCF 심층 분석 (축약 프롬프트, company_name은 호출자에서 전달)"""
     current_price = latest_data["current_price"]
     rsi = latest_data["current_rsi"]
@@ -147,21 +159,17 @@ def run_dcf_analysis(latest_data: dict, ticker_name: str, company_name: str = ""
 ```"""
 
     try:
-        response = client.models.generate_content(
-            model='gemini-2.5-flash',
-            contents=prompt
-        )
+        response = get_client().models.generate_content(model=model, contents=prompt)
         price_levels = _extract_price_levels(response.text)
         return {
             "content": response.text,
             "confidence_score": 95,
             "analysis_type": "DCF",
-            "price_levels": price_levels
+            "price_levels": price_levels,
         }
     except Exception as e:
         return {
             "content": f"DCF 분석 중 오류 발생: {str(e)}",
             "confidence_score": 0,
-            "analysis_type": "DCF"
+            "analysis_type": "DCF",
         }
-

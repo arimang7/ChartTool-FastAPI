@@ -10,3 +10,4 @@ authlib
 httpx
 PyJWT
 itsdangerous
+ruff

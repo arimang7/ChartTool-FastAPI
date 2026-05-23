@@ -1,6 +1,7 @@
-from fastapi import APIRouter, Request, Response, HTTPException
 from fastapi.responses import RedirectResponse
-from services.auth_service import oauth, create_jwt_token, verify_jwt_token, REDIRECT_URI
+
+from fastapi import APIRouter, HTTPException, Request, Response
+from services.auth_service import REDIRECT_URI, create_jwt_token, oauth, verify_jwt_token
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
@@ -16,27 +17,23 @@ async def auth_callback(request: Request):
     """Google OAuth 콜백 처리"""
     try:
         token = await oauth.google.authorize_access_token(request)
-        user_info = token.get('userinfo')
+        user_info = token.get("userinfo")
 
         if not user_info:
             raise HTTPException(status_code=400, detail="사용자 정보를 가져올 수 없습니다.")
 
-        email = user_info.get('email', '')
-        name = user_info.get('name', '')
+        email = user_info.get("email", "")
+        name = user_info.get("name", "")
 
         # JWT 토큰 생성 후 쿠키에 설정
         jwt_token = create_jwt_token(email, name)
         response = RedirectResponse(url="/")
         response.set_cookie(
-            key="auth_token",
-            value=jwt_token,
-            httponly=True,
-            max_age=3600 * 24,
-            samesite="lax"
+            key="auth_token", value=jwt_token, httponly=True, max_age=3600 * 24, samesite="lax"
         )
         return response
-    except Exception as e:
-        return RedirectResponse(url=f"/?error=auth_failed")
+    except Exception:
+        return RedirectResponse(url="/?error=auth_failed")
 
 
 @router.get("/me")
@@ -50,11 +47,7 @@ async def get_current_user(request: Request):
     if not payload:
         return {"logged_in": False, "email": "", "name": ""}
 
-    return {
-        "logged_in": True,
-        "email": payload.get("email", ""),
-        "name": payload.get("name", "")
-    }
+    return {"logged_in": True, "email": payload.get("email", ""), "name": payload.get("name", "")}
 
 
 @router.post("/logout")

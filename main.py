@@ -1,26 +1,28 @@
 import os
-import sys
 from pathlib import Path
+
 from dotenv import load_dotenv
 
-# .env 파일 로드 (프로젝트 루트에서)
-env_path = Path(__file__).resolve().parent.parent / ".env"
+# .env 파일 로드 (프로젝트 루트 또는 현재 폴더에서)
+env_path = Path(__file__).resolve().parent / ".env"
+if not env_path.exists():
+    env_path = Path(__file__).resolve().parent.parent / ".env"
 load_dotenv(env_path)
 
-from fastapi import FastAPI, Request
-from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 from starlette.middleware.sessions import SessionMiddleware
 
-from routers import stock, analysis, telegram, auth
+from fastapi import FastAPI
+from routers import analysis, auth, stock, telegram
 
 app = FastAPI(title="AI 주식 분석 도구", version="1.0.0")
 
 # 세션 미들웨어 (OAuth에 필요)
 app.add_middleware(
     SessionMiddleware,
-    secret_key=os.getenv("JWT_SECRET", "fastapi-charttool-secret-key-change-in-production")
+    secret_key=os.getenv("JWT_SECRET", "fastapi-charttool-secret-key-change-in-production"),
 )
 
 # CORS 설정

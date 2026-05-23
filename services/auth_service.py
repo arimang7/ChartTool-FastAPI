@@ -1,8 +1,8 @@
 import os
-import jwt
 import time
-from authlib.integrations.starlette_client import OAuth
 
+import jwt
+from authlib.integrations.starlette_client import OAuth
 
 # Google OAuth2 설정
 CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID", "")
@@ -15,13 +15,11 @@ JWT_EXPIRATION = 3600 * 24  # 24시간
 # Authlib OAuth 설정
 oauth = OAuth()
 oauth.register(
-    name='google',
+    name="google",
     client_id=CLIENT_ID,
     client_secret=CLIENT_SECRET,
-    server_metadata_url='https://accounts.google.com/.well-known/openid-configuration',
-    client_kwargs={
-        'scope': 'openid email profile'
-    }
+    server_metadata_url="https://accounts.google.com/.well-known/openid-configuration",
+    client_kwargs={"scope": "openid email profile"},
 )
 
 
@@ -31,7 +29,7 @@ def create_jwt_token(email: str, name: str = "") -> str:
         "email": email,
         "name": name,
         "exp": int(time.time()) + JWT_EXPIRATION,
-        "iat": int(time.time())
+        "iat": int(time.time()),
     }
     return jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
 
