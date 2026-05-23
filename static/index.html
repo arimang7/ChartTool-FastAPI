@@ -163,7 +163,15 @@
       <!-- AI 분석 섹션 -->
       <div class="analysis-section">
         <div class="divider"></div>
-        <h2 class="section-title analysis-title">🪄 AI 심층 분석 리포트</h2>
+        <div class="analysis-header">
+          <h2 class="section-title analysis-title">🪄 AI 심층 분석 리포트</h2>
+          <div class="model-selection-wrapper">
+            <label for="modelSelect">LLM 모델 선택</label>
+            <select id="modelSelect" onchange="onModelChange()" disabled>
+              <option value="">⏳ Checking model status...</option>
+            </select>
+          </div>
+        </div>
         <div class="analysis-buttons">
           <button
             class="btn btn-analysis"

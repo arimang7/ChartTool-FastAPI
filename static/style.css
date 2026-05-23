@@ -911,3 +911,102 @@ body {
 .loading {
   animation: pulse 1.5s ease-in-out infinite;
 }
+
+/* ============================
+   Analysis Header & Model Selection Styling
+   ============================ */
+.analysis-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 24px;
+  gap: 16px;
+  border-bottom: 1px solid var(--border-color);
+  padding-bottom: 14px;
+}
+
+.analysis-header .analysis-title {
+  margin-bottom: 0;
+}
+
+.model-selection-wrapper {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  transition: var(--transition);
+}
+
+.model-selection-wrapper label {
+  font-size: 0.85rem;
+  font-weight: 500;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+.model-selection-wrapper select {
+  width: 280px;
+  padding: 8px 12px;
+  background: var(--bg-glass);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  color: var(--text-primary);
+  font-size: 0.85rem;
+  font-family: inherit;
+  transition: var(--transition);
+  outline: none;
+  cursor: pointer;
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' fill='%23a0a0b8' viewBox='0 0 16 16'%3E%3Cpath d='M8 11L3 6h10l-5 5z'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 12px center;
+  padding-right: 36px;
+}
+
+.model-selection-wrapper select:hover:not(:disabled) {
+  border-color: var(--border-hover);
+}
+
+.model-selection-wrapper select:focus:not(:disabled) {
+  border-color: var(--accent-primary);
+  box-shadow: 0 0 0 3px rgba(108, 92, 231, 0.15);
+}
+
+.model-selection-wrapper select:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.model-selection-wrapper select option {
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+}
+
+@media (max-width: 768px) {
+  .analysis-header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 12px;
+    padding-bottom: 12px;
+  }
+  .model-selection-wrapper {
+    width: 100%;
+    justify-content: space-between;
+  }
+  .model-selection-wrapper select {
+    width: auto;
+    max-width: 240px;
+    flex: 1;
+  }
+}
+
+@media (max-width: 480px) {
+  .model-selection-wrapper {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 6px;
+  }
+  .model-selection-wrapper select {
+    max-width: 100%;
+    width: 100%;
+  }
+}

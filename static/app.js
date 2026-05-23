@@ -17,6 +17,7 @@ let acSelectedIndex = -1;
 // ============================
 document.addEventListener("DOMContentLoaded", () => {
   checkAuth();
+  checkModelHealth();
 
   const tickerInput = document.getElementById("tickerInput");
 
@@ -472,6 +473,68 @@ function renderNews(news) {
 }
 
 // ============================
+// LLM Model Health Check
+// ============================
+async function checkModelHealth() {
+  const modelSelect = document.getElementById("modelSelect");
+  if (!modelSelect) return;
+
+  modelSelect.disabled = true;
+  modelSelect.innerHTML = `<option value="">⏳ Checking model status...</option>`;
+
+  try {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 4000); // 4초 타임아웃 설정
+
+    const res = await fetch("/api/analysis/model-health", { signal: controller.signal });
+    clearTimeout(timeoutId);
+
+    if (!res.ok) throw new Error("모델 상태를 가져오지 못했습니다.");
+
+    const data = await res.json();
+    modelSelect.innerHTML = data.models.map(m => {
+      let statusColorEmoji = "🔴";
+      let statusText = "Busy";
+      if (m.status === "fast") {
+        statusColorEmoji = "🟢";
+        statusText = "Fast";
+      } else if (m.status === "normal") {
+        statusColorEmoji = "🟡";
+        statusText = "Normal";
+      }
+      return `<option value="${m.id}">${m.label} (${statusColorEmoji} ${statusText}, ${m.latency.toLocaleString()}ms)</option>`;
+    }).join("");
+
+    modelSelect.value = data.recommended;
+    modelSelect.disabled = false;
+  } catch (e) {
+    modelSelect.innerHTML = `
+      <option value="gemini-3.5-flash">🚀 gemini-3.5-flash (🟢 Fast, Fallback)</option>
+      <option value="gemini-3.1-pro">💡 gemini-3.1-pro (🟢 Fast, Fallback)</option>
+      <option value="gemini-3.1-flash-lite">⚡ gemini-3.1-flash-lite (🟢 Fast, Fallback)</option>
+      <option value="gemini-2.5-flash" selected>⚙️ gemini-2.5-flash (🟢 Fast, Fallback)</option>
+    `;
+    modelSelect.disabled = false;
+    showToast("모델 상태 체크 실패. 기본값으로 설정합니다.", "warning");
+  }
+}
+
+function onModelChange() {
+  const modelSelect = document.getElementById("modelSelect");
+  showToast(`선택된 모델: ${modelSelect.value}`, "info");
+}
+
+function setAnalysisUIState(isLoading) {
+  const aiBtn = document.getElementById("aiAnalysisBtn");
+  const dcfBtn = document.getElementById("dcfAnalysisBtn");
+  const modelSelect = document.getElementById("modelSelect");
+
+  if (aiBtn) aiBtn.disabled = isLoading;
+  if (dcfBtn) dcfBtn.disabled = isLoading;
+  if (modelSelect) modelSelect.disabled = isLoading;
+}
+
+// ============================
 // AI Analysis (SSE Streaming)
 // ============================
 async function runAnalysis(type) {
@@ -479,8 +542,7 @@ async function runAnalysis(type) {
   const btn = document.getElementById(btnId);
   setButtonLoading(btn, true);
 
-  document.getElementById("aiAnalysisBtn").disabled = true;
-  document.getElementById("dcfAnalysisBtn").disabled = true;
+  setAnalysisUIState(true);
 
   // 분석 결과 숨기기, 진행 표시 보이기
   document.getElementById("analysisResult").style.display = "none";
@@ -492,9 +554,11 @@ async function runAnalysis(type) {
   // SSE 엔드포인트 구성
   const endpoint =
     type === "ai" ? "/api/analysis/ai/stream" : "/api/analysis/dcf/stream";
+  const modelSelect = document.getElementById("modelSelect");
   const params = new URLSearchParams({
     symbol: currentTicker,
     period: currentPeriod,
+    model: modelSelect ? modelSelect.value : "gemini-2.5-flash",
     ...(type === "ai" ? { news_text: currentNewsText } : {}),
   });
 
@@ -569,8 +633,7 @@ async function runAnalysis(type) {
       }
 
       setButtonLoading(btn, false);
-      document.getElementById("aiAnalysisBtn").disabled = false;
-      document.getElementById("dcfAnalysisBtn").disabled = false;
+      setAnalysisUIState(false);
     });
 
     eventSource.addEventListener("error", (e) => {
@@ -583,8 +646,7 @@ async function runAnalysis(type) {
       }
       progressDiv.style.display = "none";
       setButtonLoading(btn, false);
-      document.getElementById("aiAnalysisBtn").disabled = false;
-      document.getElementById("dcfAnalysisBtn").disabled = false;
+      setAnalysisUIState(false);
     });
 
     eventSource.onerror = () => {
@@ -592,15 +654,13 @@ async function runAnalysis(type) {
       if (eventSource.readyState === EventSource.CLOSED) return;
       eventSource.close();
       setButtonLoading(btn, false);
-      document.getElementById("aiAnalysisBtn").disabled = false;
-      document.getElementById("dcfAnalysisBtn").disabled = false;
+      setAnalysisUIState(false);
     };
   } catch (e) {
     showToast(e.message || "분석 실패", "error");
     progressDiv.style.display = "none";
     setButtonLoading(btn, false);
-    document.getElementById("aiAnalysisBtn").disabled = false;
-    document.getElementById("dcfAnalysisBtn").disabled = false;
+    setAnalysisUIState(false);
   }
 }
 
